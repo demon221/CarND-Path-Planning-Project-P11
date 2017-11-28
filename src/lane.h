@@ -50,9 +50,9 @@ namespace carnd
 	{
 		double center = lane_center(lane);
 		if (lane == 0) // left lane
-			center += 0;
+			center += 0.1;
 		else if (lane == lane_count - 1) // right lane
-			center -= 0;
+			center -= 0.1;
 		return center;
 	}
 

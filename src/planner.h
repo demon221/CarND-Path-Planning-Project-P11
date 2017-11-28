@@ -77,7 +77,7 @@ namespace carnd
 		vector<lane_info_t> lane_info;
 
 		double accel = 0.1; // m/s^2
-		double emergy_accel = 0.2; // m/s^2
+		double emergy_accel = 0.15; // m/s^2
 		bool warning_collision = false;
 
 		// Number of points
@@ -97,9 +97,10 @@ namespace carnd
 		sd_t ego_start_position;
 
 		// Lane change parameter
-		double lane_horizon = 50; //m
-		double lane_change_front_buffer = 10; //m
-		double lane_change_back_buffer = -10; //m, backward minus value
+		double lane_horizon = 30; //m
+		double lane_change_front_buffer = 15; //m
+		double lane_change_back_buffer = -15; //m, backward minus value
+		double lane_dec_front_buffer = 10;
 		double lane_emergy_front_buffer = 5; //m
 
 		// Target lane for next path
@@ -439,7 +440,7 @@ namespace carnd
 				// assert( target_lane == ref_lane);
 				cout << " ** KEEP LANE = " << target_lane
 				     << " FOR " << setprecision(2) << meters_in_state << "m"
-				     << " (cte= " << setprecision(1) << setw(4) << cte << " m)"
+				     << " (cte= " << setprecision(2) << setw(4) << cte << " m)"
 				     << endl;
 
 				target_speed = road_speed_limit;
@@ -447,14 +448,15 @@ namespace carnd
 				// Evaluate lane change
 				changing_lane = -1;
 				// Check if current lane has slower cars in front
-				if (lane_info[target_lane].front_gap < lane_change_front_buffer 
-					&& lane_info[target_lane].front_speed < ego.v
-					&& meters_in_state > 100)
+				if (lane_info[ref_lane].front_gap < lane_change_front_buffer 
+					&& lane_info[ref_lane].front_speed < ego.v
+					&& meters_in_state > 50)
 				{
+					changing_lane = ref_lane + ((best_lane > ref_lane) ? 1 : -1);
 					// Change if not in the best lane
-					if (lane_info[best_lane].front_speed > lane_info[target_speed].front_speed)
+					if (lane_info[changing_lane].front_speed > lane_info[target_speed].front_speed
+					&&  lane_info[changing_lane].front_gap > lane_change_front_buffer)
 					{
-						changing_lane = best_lane;
 						set_state(ego, STATE::PRELANECHANGE);
 					}
 				}
@@ -469,14 +471,13 @@ namespace carnd
 
 				cout << " ** PREPARE CHANGE TO LANE = " << changing_lane
 				     << " FOR " << setprecision(2) << meters_in_state << "m"
-				     << " (cte= " << setprecision(1) << setw(4) << cte << " m)"
+				     << " (cte= " << setprecision(2) << setw(4) << cte << " m)"
 				     << endl;
 
-				target_lane = ref_lane + ((changing_lane > ref_lane) ? 1 : -1);
-
 				// If target lane is feasible, then change lane
-				if (lane_info[target_lane].feasible && meters_in_state > 5)
+				if (lane_info[changing_lane].feasible && meters_in_state > 5)
 				{
+					target_lane = changing_lane;
 					set_state(ego, STATE::LANECHANGE);
 					
 				}
@@ -489,10 +490,16 @@ namespace carnd
 				}
 				else // If not feasible, then wait in this lane and try to slow down
 				{
-					if (lane_info[ref_lane].front_gap < lane_change_front_buffer)
+					if (lane_info[ref_lane].front_gap < lane_change_front_buffer
+					&& meters_in_state > 20)
 					{
 						target_lane = ref_lane;
 						target_speed = fmin(target_speed, lane_info[target_lane].front_speed);
+					}
+					else
+					{
+						target_lane = ref_lane;
+						target_speed = fmin(target_speed, ref_v + accel);
 					}
 				}
 
@@ -504,15 +511,15 @@ namespace carnd
 			{
 				cout << " ** CHANGING TO LANE = " << target_lane
 				     << " FOR " << setprecision(2) << meters_in_state << " m"
-				     << " cte=" << setprecision(1) << setw(4) << cte << " m)"
+				     << " cte=" << setprecision(2) << setw(4) << cte << " m)"
 				     << endl;
 
 				// Accelerate when lane changning
-				target_speed = fmin(target_speed, ref_v + accel);
+				target_speed = road_speed_limit;
 				cte = (ref_d - lane.lane_center(target_lane));
 
 				// Check lane change completed
-				if (ref_lane == target_lane && fabs(cte) <= 0.3 && meters_in_state > 50)
+				if (ref_lane == target_lane && fabs(cte) <= 0.4 && meters_in_state > 50)
 				{
 					// If not best lane, then prepare to lang change
 					if (changing_lane >= 0 && changing_lane != ref_lane)
@@ -547,22 +554,23 @@ namespace carnd
 	// 4. Collision avoidance
 	void PathPlanner::collision_avoidance()
 	{
-		if (lane_info[target_lane].front_gap < lane_change_front_buffer)
+		if (lane_info[ref_lane].front_gap < lane_dec_front_buffer)
 		{
 			// Decelerate if too close
-			if (lane_info[target_lane].front_gap < lane_emergy_front_buffer)
+			if (lane_info[ref_lane].front_gap < lane_emergy_front_buffer)
 			{
-				target_speed = fmax(0.0, fmin(target_speed, lane_info[target_lane].front_speed - 0.2));
+				target_speed = fmax(0.0, fmin(target_speed, lane_info[ref_lane].front_speed - 0.2));
 				warning_collision = true;
 			}
 			// Follow the lead
 			else
 			{
-				target_speed = fmax(0.0, fmin(target_speed, lane_info[target_lane].front_speed));
+				target_speed = fmax(0.0, fmin(target_speed, lane_info[ref_lane].front_speed));
 				warning_collision = false;
 			}
 
-			cout << " ** FOLLOW THE LEAD (" << lane_info[target_lane].front_gap << " m)" << endl;
+			cout << " ** FOLLOW THE LEAD (" << lane_info[ref_lane].front_gap << " m)" << endl;
+			cout << " ** COLLISIONWARNING = " << warning_collision << endl;
 		}
 	} // end PathPlanner::collision_avoidance()
 
@@ -611,7 +619,7 @@ namespace carnd
 		// Add three more points, each has 30m space
 		for(int i = 1; i <=3; i++)
 		{
-			xy_t next_wp = roadmap.to_xy(ref_s + 30 * i, target_d);
+			xy_t next_wp = roadmap.to_xy(ref_s + lane_horizon * i, target_d);
 			anchors.append(next_wp);
 		}
 
@@ -633,7 +641,7 @@ namespace carnd
 		path.y.assign(ego.previous_path.y.begin(), ego.previous_path.y.end());
 
 		// Set a horizon of 30m
-		const double target_x = 30;
+		const double target_x = lane_horizon;
 		const double target_y = spline(target_x);
 		const double target_dist = norm(target_x, target_y);
 
